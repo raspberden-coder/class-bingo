@@ -127,16 +127,19 @@
     const n = getCats().length;
     const size = n >= 24 ? 5 : n >= 15 ? 4 : 3;
     $("catCount").textContent = n < 8 ? `${n} squares — need at least 8` : `${n} squares → ${size}×${size} cards`;
-    store.set("lb_cats", $("cats").value);
   }
+  // Remember the host's edits, but drop them automatically when the default list on the server changes
+  const baseKey = () => defaults.join("\n");
+  $("cats").addEventListener("input", () => { store.set("lb_cats", $("cats").value); store.set("lb_cats_base", baseKey()); });
   $("cats").addEventListener("input", updateCount);
 
   fetch("/api/defaults").then((r) => r.json()).then((d) => {
     defaults = d.categories || [];
-    $("cats").value = store.get("lb_cats") || defaults.join("\n");
+    const saved = store.get("lb_cats");
+    $("cats").value = saved && store.get("lb_cats_base") === baseKey() ? saved : defaults.join("\n");
     updateCount();
   });
-  $("resetCats").onclick = () => { $("cats").value = defaults.join("\n"); updateCount(); };
+  $("resetCats").onclick = () => { $("cats").value = defaults.join("\n"); store.set("lb_cats", ""); updateCount(); };
 
   function recent() { try { return JSON.parse(store.get("lb_recent") || "[]"); } catch (e) { return []; } }
   function renderRecent() {
