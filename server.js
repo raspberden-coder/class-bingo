@@ -39,6 +39,7 @@ const io = new Server(server, { cors: { origin: "*" } });
 const sessions = new Map();
 
 // ---------- helpers ----------
+const cleanSeed = (s) => String(s ?? "").replace(/[^a-z0-9]/gi, "").slice(0, 16) || "x";
 const clean = (s, max = 80) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, max);
 
 function makeCode() {
@@ -107,6 +108,7 @@ function publicState(s) {
     for (const c of cats) heard[c] = (heard[c] || 0) + 1;
     players.push({
       name: p.name,
+      avatar: p.avatar,
       marks: p.marked.size,
       lines: p.lines,
       online: p.sockets.size > 0,
@@ -129,7 +131,7 @@ function publicState(s) {
 }
 
 function yourState(p) {
-  return { name: p.name, card: p.card, marked: [...p.marked], lines: p.lines };
+  return { name: p.name, avatar: p.avatar, card: p.card, marked: [...p.marked], lines: p.lines };
 }
 
 function broadcast(s) {
@@ -158,7 +160,7 @@ function ranking(s) {
     .filter((p) => p.marked.size > 0)
     .sort((a, b) =>
       (a.bingoAt || Infinity) - (b.bingoAt || Infinity) || b.lines - a.lines || b.marked.size - a.marked.size)
-    .map((p, i) => ({ name: p.name, place: i + 1, lines: p.lines, marks: p.marked.size }));
+    .map((p, i) => ({ name: p.name, avatar: p.avatar, place: i + 1, lines: p.lines, marks: p.marked.size }));
 }
 
 let cachedBoard = [];
@@ -288,7 +290,7 @@ io.on("connection", (socket) => {
     typeof ack === "function" && ack({ ok: true, state: publicState(s) });
   });
 
-  socket.on("player:join", ({ code, name, pid } = {}, ack) => {
+  socket.on("player:join", ({ code, name, pid, avatar } = {}, ack) => {
     if (typeof ack !== "function") return;
     const s = sessions.get(String(code || "").toUpperCase());
     if (!s) return ack({ ok: false, error: "Session not found — check the code" });
@@ -302,9 +304,10 @@ io.on("connection", (socket) => {
       if (s.status !== "live") return ack({ ok: false, error: "This session has ended" });
       const taken = [...s.players.values()].some((x) => x.name.toLowerCase() === name.toLowerCase());
       if (taken) return ack({ ok: false, error: "That name is taken in this session" });
-      p = { name, card: makeCard(s.categories), marked: new Set(), lines: 0, bingoAt: null, sockets: new Set() };
+      p = { name, avatar: cleanSeed(avatar), card: makeCard(s.categories), marked: new Set(), lines: 0, bingoAt: null, sockets: new Set() };
       s.players.set(pid, p);
     }
+    if (avatar) p.avatar = cleanSeed(avatar);
     p.sockets.add(socket.id);
     socket.data.playerKey = { code: s.code, pid };
     socket.join("s:" + s.code);
@@ -330,7 +333,7 @@ io.on("connection", (socket) => {
       newBingo = true;
       if (!p.bingoAt) p.bingoAt = Date.now();
       s.winners.push({ name: p.name, lines: p.lines, at: Date.now() });
-      io.to("s:" + s.code).emit("bingo", { name: p.name, lines: p.lines, first: s.winners.length === 1 });
+      io.to("s:" + s.code).emit("bingo", { name: p.name, avatar: p.avatar, lines: p.lines, first: s.winners.length === 1 });
     }
     for (const sid of p.sockets) if (sid !== socket.id) io.to(sid).emit("you", yourState(p));
     broadcast(s);

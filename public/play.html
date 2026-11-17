@@ -17,10 +17,15 @@
   <section id="joinView" class="hidden">
     <h1 id="joinTitle">Join</h1>
     <form class="panel" id="nameForm" style="max-width:460px" autocomplete="off">
+      <h3>Your face</h3>
+      <div class="ava-pick">
+        <div id="avaPreview"></div>
+        <button type="button" class="btn ghost small" id="reroll">🎲 Another face</button>
+      </div>
       <h3>Your name</h3>
       <input id="name" maxlength="24" placeholder="or a nickname">
       <div class="spacer"></div>
-      <button class="btn" style="width:100%">Get my card →</button>
+      <button class="btn" id="joinBtn" style="width:100%">Get my card →</button>
       <div class="err" id="err"></div>
     </form>
   </section>
@@ -67,6 +72,7 @@
 <div class="toast" id="toast"></div>
 
 <script src="/socket.io/socket.io.js"></script>
+<script src="/avatar.js"></script>
 <script>
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -80,6 +86,13 @@
   let pid = store.get("lb_pid_" + code);
   if (!pid) { pid = Math.random().toString(36).slice(2) + Date.now().toString(36); store.set("lb_pid_" + code, pid); }
   $("name").value = store.get("lb_name") || "";
+  let avatar = store.get("lb_avatar") || newAvatarSeed();
+  function showAva(anim) {
+    $("avaPreview").innerHTML = avatarSVG(avatar, 84);
+    if (anim) $("avaPreview").firstChild.classList.add("wobble");
+  }
+  showAva(false);
+  $("reroll").addEventListener("click", () => { avatar = newAvatarSeed(); showAva(true); });
 
   let state = null, me = null, joined = false;
   const socket = io();
@@ -95,7 +108,7 @@
       socket.emit("session:watch", { code }, (w) => {
         if (!w.ok) { show("missingView"); return; }
         state = w.state;
-        $("joinTitle").innerHTML = esc(state.title) + "<br><em>bingo.</em>";
+        $("joinTitle").innerHTML = /bingo/i.test(state.title) ? esc(state.title).replace(/(bingo)/i, "<em>$1</em>") : esc(state.title) + "<br><em>bingo.</em>";
         if (state.status !== "live") { $("missingMsg").textContent = "This game has ended."; show("missingView"); return; }
         show("joinView");
         $("name").focus();
@@ -109,7 +122,8 @@
     const name = $("name").value.trim();
     if (!name) { $("err").textContent = "Enter a name."; return; }
     store.set("lb_name", name);
-    socket.emit("player:join", { code, pid, name }, (res) => {
+    store.set("lb_avatar", avatar);
+    socket.emit("player:join", { code, pid, name, avatar }, (res) => {
       if (!res.ok) { $("err").textContent = res.error; return; }
       joined = true; state = res.state; me = res.you; show("gameView"); render();
     });
@@ -118,9 +132,10 @@
   socket.on("session:state", (s) => { state = s; if (joined) render(); });
   socket.on("you", (y) => { me = y; render(); });
   socket.on("kicked", () => { joined = false; toast("You were removed from this game."); show("missingView"); });
-  socket.on("bingo", ({ name, lines, first }) => {
+  socket.on("bingo", ({ name, avatar: ava, lines, first }) => {
     const mine = me && name === me.name;
-    $("boomWho").textContent = mine ? (lines > 1 ? `You: ${lines} lines!` : "That's you!") : `${name}${first ? " got there first" : " got a line"}`;
+    $("boomWho").innerHTML = `<div style="display:flex;justify-content:center;margin-bottom:8px">${avatarSVG(ava, 72)}</div>`;
+    $("boomWho").insertAdjacentText("beforeend", mine ? (lines > 1 ? `You: ${lines} lines!` : "That's you!") : `${name}${first ? " got there first" : " got a line"}`);
     $("overlay").classList.add("show");
     clearTimeout(window._boom);
     window._boom = setTimeout(() => $("overlay").classList.remove("show"), mine ? 3200 : 2200);
@@ -134,7 +149,7 @@
       const p = byPlace(n);
       if (!p) return `<div class="step p${n}"></div>`;
       const mine = me && p.name === me.name;
-      return `<div class="step p${n}"><div class="nm">${mine ? "⭐ " : ""}${esc(p.name)}</div>
+      return `<div class="step p${n}"><div class="face">${avatarSVG(p.avatar, n === 1 ? 64 : 48)}</div><div class="nm">${mine ? "⭐ " : ""}${esc(p.name)}</div>
         <div class="block">${n}</div>
         <div class="sub">${p.lines ? p.lines + " line" + (p.lines > 1 ? "s" : "") : p.marks + " marked"}</div></div>`;
     };
@@ -186,7 +201,7 @@
 
     $("players").innerHTML = state.players.map((p) => `
       <li class="${p.name === me.name ? "me" : ""} ${p.online ? "" : "off"}">
-        <span>${esc(p.name)}</span>
+        <span class="who-row">${avatarSVG(p.avatar, 28)}<span>${esc(p.name)}</span></span>
         <span>${p.lines ? `<span class="bingo-badge">BINGO ×${p.lines}</span>` : `<span class="badge">${p.marks} ✓</span>`}</span>
       </li>`).join("");
 

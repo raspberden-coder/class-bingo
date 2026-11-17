@@ -41,6 +41,7 @@
   </div>
 </main>
 <script src="/socket.io/socket.io.js"></script>
+<script src="/avatar.js"></script>
 <script>
   const socket = io();
   const $ = (id) => document.getElementById(id);
@@ -66,15 +67,15 @@
     const p = fame[fameIdx % fame.length], i = fameIdx % fame.length;
     const spot = $("fameSpot");
     spot.classList.remove("flip"); void spot.offsetWidth; spot.classList.add("flip");
-    spot.innerHTML = `<div class="rank">#${i + 1} OF ALL TIME</div><div class="medal">${medal(i)}</div>
-      <div class="who">${esc(p.name)}</div>
-      <div class="stats">${p.points} pts · ${p.wins} win${p.wins === 1 ? "" : "s"} · ${p.podiums} podium${p.podiums === 1 ? "" : "s"} · ${p.bingos} bingo${p.bingos === 1 ? "" : "s"}</div>`;
+    spot.innerHTML = `<div class="rank">${medal(i)} #${i + 1} OF ALL TIME</div><div class="face">${avatarSVG(p.avatar || p.name, 64)}</div>
+      <div class="who" style="padding-right:76px">${esc(p.name)}</div>
+      <div class="stats" style="padding-right:76px">${p.points} pts · ${p.wins} win${p.wins === 1 ? "" : "s"} · ${p.podiums} podium${p.podiums === 1 ? "" : "s"} · ${p.bingos} bingo${p.bingos === 1 ? "" : "s"}</div>`;
     [...$("fameList").children].forEach((li, j) => li.classList.toggle("active", j === i));
     fameIdx++;
   }
   socket.on("leaderboard", (list) => {
     fame = list || [];
-    $("fameList").innerHTML = fame.map((p) => `<li><span>${esc(p.name)}</span><b>${p.points} pts</b></li>`).join("");
+    $("fameList").innerHTML = fame.map((p) => `<li>${avatarSVG(p.avatar || p.name, 24)}<span>${esc(p.name)}</span><b>${p.points} pts</b></li>`).join("");
     clearInterval(fameTimer);
     fameIdx = 0;
     if (fame.length) { showFame(); fameTimer = setInterval(showFame, 2600); }

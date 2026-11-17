@@ -53,6 +53,7 @@ async function createTables() {
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     -- Lock the tables for Supabase's public API; this server connects as the owner, which bypasses RLS.
+    ALTER TABLE results ADD COLUMN IF NOT EXISTS avatar TEXT;
     ALTER TABLE results ENABLE ROW LEVEL SECURITY;
     ALTER TABLE heard   ENABLE ROW LEVEL SECURITY;
   `);
@@ -72,9 +73,9 @@ async function saveRound({ session, round, title, rows, heardCounts }) {
     await client.query("BEGIN");
     for (const r of rows) {
       await client.query(
-        `INSERT INTO results (session, round, title, name, name_key, place, players, lines, marks)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-        [session, round, title, r.name, r.name.toLowerCase(), r.place, players, r.lines, r.marks]
+        `INSERT INTO results (session, round, title, name, name_key, place, players, lines, marks, avatar)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [session, round, title, r.name, r.name.toLowerCase(), r.place, players, r.lines, r.marks, r.avatar || null]
       );
     }
     for (const [category, count] of Object.entries(heardCounts || {})) {
@@ -99,6 +100,7 @@ async function leaderboard(limit = 10) {
     for (const r of memory) {
       const s = by.get(r.name_key) || { name: r.name, games: 0, wins: 0, podiums: 0, bingos: 0, points: 0 };
       s.name = r.name;
+      s.avatar = r.avatar;
       s.games++;
       if (r.place === 1) s.wins++;
       if (r.place <= 3) s.podiums++;
@@ -110,6 +112,7 @@ async function leaderboard(limit = 10) {
   }
   const { rows } = await pool.query(
     `SELECT (array_agg(name ORDER BY created_at DESC))[1] AS name,
+            (array_agg(avatar ORDER BY created_at DESC))[1] AS avatar,
             count(*)::int AS games,
             count(*) FILTER (WHERE place = 1)::int AS wins,
             count(*) FILTER (WHERE place <= 3)::int AS podiums,
