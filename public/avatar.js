@@ -1,5 +1,8 @@
-// Procedural funny-face avatars. avatarSVG(seed) always draws the same face for the same seed.
+// Pixel-art funny faces in the style of old Japanese feature-phone emoji (16×16).
+// avatarSVG(seed, size) always draws the same face for the same seed.
 (function () {
+  const N = 16;
+
   function hash(str) {
     let h = 1779033703 ^ str.length;
     for (let i = 0; i < str.length; i++) {
@@ -18,89 +21,143 @@
     };
   }
 
-  const SKINS = ["#d7ff3c", "#ff8a65", "#ffd166", "#9be7c4", "#c3b1ff", "#ff9ecf", "#8fd3ff", "#f4e1c1", "#b8e986", "#ffb3a1"];
-  const BGS = ["#141210", "#ff3d17", "#0e6e6e", "#3c3bff", "#1f7a4d", "#7a2bd6"];
-  const INK = "#141210";
+  // i-mode-ish palette: loud, flat colours
+  const SKINS = ["#ffcc00", "#ff9900", "#ff99cc", "#66cc33", "#33ccff", "#cc99ff", "#ffffff", "#ffddaa", "#ff6666", "#99ffcc", "#d7ff3c", "#ffb3e6"];
+  const BGS = ["#141210", "#ff3d17", "#0e6e6e", "#3c3bff", "#1f7a4d", "#7a2bd6", "#ff66aa", "#ffaa00"];
+  const C = { k: "#141210", w: "#ffffff", r: "#ff2a2a", p: "#ff7eb6", b: "#2aa8ff", y: "#ffe600", g: "#9a9a9a", o: "#ff8a00" };
+
+  // ---- head shapes: inside(x, y) on a 16×16 grid ----
+  const HEADS = {
+    round: (x, y) => ((x - 7.5) / 6.6) ** 2 + ((y - 8.6) / 6.1) ** 2 <= 1,
+    wide: (x, y) => ((x - 7.5) / 7.2) ** 2 + ((y - 9) / 5.4) ** 2 <= 1,
+    egg: (x, y) => ((x - 7.5) / (y < 8 ? 5.4 : 6.4)) ** 2 + ((y - 8.5) / 6.6) ** 2 <= 1,
+    square: (x, y) => x >= 2 && x <= 13 && y >= 3 && y <= 14 && !((x === 2 || x === 13) && (y === 3 || y === 14)),
+    onigiri: (x, y) => y >= 2 && y <= 14 && Math.abs(x - 7.5) <= 2.2 + (y - 2) * 0.5 && !(y === 14 && Math.abs(x - 7.5) > 6),
+    ghost: (x, y) => (y <= 8 ? ((x - 7.5) / 6) ** 2 + ((y - 8) / 6) ** 2 <= 1 : x >= 2 && x <= 13 && !(y === 14 && x % 3 === 0)),
+    alien: (x, y) => ((x - 7.5) / (7 - Math.max(0, y - 9) * 0.9)) ** 2 + ((y - 7.6) / 6.6) ** 2 <= 1,
+    blob: null, // generated per seed
+  };
+
+  function makeBlob(r) {
+    const k = Array.from({ length: 8 }, () => 0.85 + r() * 0.25);
+    return (x, y) => {
+      const dx = x - 7.5, dy = y - 8.6;
+      const ang = Math.atan2(dy, dx);
+      const i = ((Math.round(((ang + Math.PI) / (Math.PI * 2)) * 8) % 8) + 8) % 8;
+      return (dx / (6.5 * k[i])) ** 2 + (dy / (6 * k[(i + 3) % 8])) ** 2 <= 1;
+    };
+  }
+
+  // ---- sprite parts (the left eye is mirrored for the right one) ----
+  // letters: k ink, w white, r red, p pink, b blue, y yellow, g grey, o orange, _ transparent
+  const EYES = [
+    ["k"], ["kk", "kk"], ["_k_", "k_k"], ["kkk"], ["k_k", "_k_", "k_k"], ["kkk", "kwk", "kkk"],
+    ["_kk", "kwk", "kkk"], ["r_r", "rrr", "_r_"], ["_y_", "yyy", "_y_"], ["k__", "_k_", "k__"],
+    ["kkk", "k_k", "kkk"], ["___", "kkk", "_k_"], ["kk", "wk"], ["k", "k"], ["_k", "k_"], ["b", "b"],
+  ];
+  const MOUTHS = [
+    ["k___k", "_kkk_"], ["k_k_k", "_k_k_"], ["_k_", "k_k", "_k_"], ["kkkk", "krrk", "_kk_"],
+    ["kkkk", "kwwk", "kkkk"], ["kkk"], ["_kkk_", "k___k"], ["_k_k_", "k_k_k"], ["kkkkk", "k_r_k", "_kkk_"],
+    ["kk", "kk"], ["k___", "_kkk"], ["kkkk", "_rr_"], ["k_k", "_k_"], ["kwwwk", "kkkkk"], ["_r_", "rrr"],
+  ];
 
   function avatarSVG(seed, size) {
     const r = rng(seed || "x");
     const pick = (a) => a[Math.floor(r() * a.length)];
-    const between = (a, b) => a + r() * (b - a);
+    const chance = (p) => r() < p;
+    const grid = Array.from({ length: N }, () => Array(N).fill(null));
+    const set = (x, y, c) => { if (x >= 0 && y >= 0 && x < N && y < N && c) grid[y][x] = c; };
+    const stamp = (pat, x0, y0, mirror) => {
+      pat.forEach((row, dy) => [...row].forEach((ch, dx) => {
+        if (ch === "_") return;
+        set(mirror ? x0 - dx : x0 + dx, y0 + dy, C[ch] || ch);
+      }));
+    };
+
     const skin = pick(SKINS);
     let bg = pick(BGS);
-    if (bg === skin) bg = INK;
-    const parts = [];
+    if (bg === skin) bg = C.k;
+    const headName = pick(Object.keys(HEADS));
+    const inside = headName === "blob" ? makeBlob(r) : HEADS[headName];
 
-    // head: a wobbly blob
-    const cx = 50, cy = between(52, 58), rx = between(28, 38), ry = between(30, 38);
-    const pts = [];
-    const n = 9;
-    for (let i = 0; i < n; i++) {
-      const ang = (i / n) * Math.PI * 2;
-      const k = between(0.88, 1.1);
-      pts.push([cx + Math.cos(ang) * rx * k, cy + Math.sin(ang) * ry * k]);
+    // ears are part of the head so the outline wraps around them
+    const ears = chance(0.28) ? pick(["cat", "bunny", "bear", "horns"]) : null;
+    const earPx = [];
+    if (ears === "cat") for (let i = 0; i < 3; i++) for (let j = 0; j <= i; j++) earPx.push([3 + j, 1 + i], [12 - j, 1 + i]);
+    if (ears === "bunny") for (let y = 0; y < 4; y++) earPx.push([4, y], [5, y], [10, y], [11, y]);
+    if (ears === "bear") earPx.push([2, 2], [3, 2], [2, 3], [3, 3], [12, 2], [13, 2], [12, 3], [13, 3]);
+    const isHead = (x, y) => inside(x, y) || earPx.some(([ex, ey]) => ex === x && ey === y);
+
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (isHead(x, y)) set(x, y, skin);
+    const fill = grid.map((row) => row.slice());
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      if (!fill[y][x]) continue;
+      const edge = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => {
+        const nx = x + dx, ny = y + dy;
+        return nx < 0 || ny < 0 || nx >= N || ny >= N || !fill[ny][nx];
+      });
+      if (edge) grid[y][x] = C.k;
     }
-    let d = "";
-    for (let i = 0; i < n; i++) {
-      const p0 = pts[(i - 1 + n) % n], p1 = pts[i], p2 = pts[(i + 1) % n], p3 = pts[(i + 2) % n];
-      if (i === 0) d += `M${p1[0].toFixed(1)},${p1[1].toFixed(1)}`;
-      const c1 = [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6];
-      const c2 = [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6];
-      d += `C${c1[0].toFixed(1)},${c1[1].toFixed(1)} ${c2[0].toFixed(1)},${c2[1].toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}`;
-    }
-
-    // ears / antennae / hair
-    const top = cy - ry;
-    const hair = Math.floor(r() * 5);
-    if (hair === 1) for (let i = 0; i < 3; i++) { const x = cx - 10 + i * 10 + between(-3, 3); parts.push(`<path d="M${x},${top + 4} Q${x + between(-8, 8)},${top - 12} ${x + between(-4, 4)},${top - 16}" stroke="${INK}" stroke-width="3" fill="none" stroke-linecap="round"/>`); }
-    if (hair === 2) parts.push(`<path d="M${cx - rx * 0.8},${top + 10} Q${cx},${top - 14} ${cx + rx * 0.8},${top + 10} Q${cx},${top + 2} ${cx - rx * 0.8},${top + 10}Z" fill="${INK}"/>`);
-    if (hair === 3) { parts.push(`<line x1="${cx + 4}" y1="${top + 9}" x2="${cx + 14}" y2="${top - 12}" stroke="${INK}" stroke-width="3"/><circle cx="${cx + 14}" cy="${top - 13}" r="4" fill="#ff3d17" stroke="${INK}" stroke-width="2.5"/>`); }
-    if (hair === 4) { parts.push(`<circle cx="${cx - rx + 2}" cy="${cy}" r="7" fill="${skin}" stroke="${INK}" stroke-width="3"/><circle cx="${cx + rx - 2}" cy="${cy + between(-6, 6)}" r="${between(5, 9)}" fill="${skin}" stroke="${INK}" stroke-width="3"/>`); }
-
-    parts.push(`<path d="${d}Z" fill="${skin}" stroke="${INK}" stroke-width="3.5" stroke-linejoin="round"/>`);
+    if (ears === "bunny") { set(4, 2, C.p); set(11, 2, C.p); }
+    if (ears === "cat") { set(4, 3, C.p); set(11, 3, C.p); }
+    if (ears === "horns") { set(3, 2, C.r); set(3, 1, C.r); set(2, 0, C.r); set(12, 2, C.r); set(12, 1, C.r); set(13, 0, C.r); }
 
     // eyes
-    const eyeY = cy - between(2, 10);
-    const gap = between(9, 15);
-    const eyeType = Math.floor(r() * 6);
-    const eye = (x, s) => {
-      if (eyeType === 0) return `<circle cx="${x}" cy="${eyeY}" r="${s}" fill="#fff" stroke="${INK}" stroke-width="2.5"/><circle cx="${x + between(-s / 2, s / 2)}" cy="${eyeY + between(-s / 2, s / 2)}" r="${s / 2.4}" fill="${INK}"/>`;
-      if (eyeType === 1) return `<path d="M${x - s},${eyeY} Q${x},${eyeY + s} ${x + s},${eyeY}" stroke="${INK}" stroke-width="3" fill="none" stroke-linecap="round"/>`;
-      if (eyeType === 2) return `<circle cx="${x}" cy="${eyeY}" r="${s * 0.45}" fill="${INK}"/>`;
-      if (eyeType === 3) return `<line x1="${x - s * 0.7}" y1="${eyeY - s * 0.7}" x2="${x + s * 0.7}" y2="${eyeY + s * 0.7}" stroke="${INK}" stroke-width="3" stroke-linecap="round"/><line x1="${x + s * 0.7}" y1="${eyeY - s * 0.7}" x2="${x - s * 0.7}" y2="${eyeY + s * 0.7}" stroke="${INK}" stroke-width="3" stroke-linecap="round"/>`;
-      if (eyeType === 4) return `<circle cx="${x}" cy="${eyeY}" r="${s}" fill="#fff" stroke="${INK}" stroke-width="2.5"/><path d="M${x - s},${eyeY} A${s},${s} 0 0 1 ${x + s},${eyeY}Z" fill="${skin}" stroke="${INK}" stroke-width="2.5"/><circle cx="${x}" cy="${eyeY + s / 3}" r="${s / 3}" fill="${INK}"/>`;
-      return `<circle cx="${x}" cy="${eyeY}" r="${s}" fill="#fff" stroke="${INK}" stroke-width="2.5"/><circle cx="${x}" cy="${eyeY}" r="${s * 0.25}" fill="${INK}"/>`;
-    };
-    if (r() < 0.12) {
-      parts.push(eye(cx + between(-3, 3), between(9, 13))); // cyclops
+    const eye = pick(EYES);
+    const eyeY = 6 + Math.floor(r() * 3);
+    const gap = 2 + Math.floor(r() * 2);
+    const lx = 7 - gap - (eye[0].length - 1);
+    if (chance(0.08)) {
+      stamp(pick([["kkk", "kwk", "kkk"], ["_kk_", "kwwk", "kwkk", "_kk_"]]), 6, eyeY - 1, false); // cyclops
     } else {
-      parts.push(eye(cx - gap, between(4, 9)), eye(cx + gap, between(4, 10))); // asymmetric on purpose
+      stamp(eye, lx, eyeY, false);
+      const right = chance(0.12) ? pick(EYES) : eye; // sometimes mismatched on purpose
+      stamp(right, 8 + gap + (right[0].length - 1), eyeY, true);
     }
-    if (r() < 0.35) parts.push(`<path d="M${cx - gap - 7},${eyeY - 11} Q${cx},${eyeY - between(12, 20)} ${cx + gap + 7},${eyeY - 11}" stroke="${INK}" stroke-width="4" fill="none" stroke-linecap="round"/>`); // unibrow
-    if (r() < 0.18) parts.push(`<circle cx="${cx - gap}" cy="${eyeY}" r="9" fill="none" stroke="${INK}" stroke-width="2.5"/><circle cx="${cx + gap}" cy="${eyeY}" r="9" fill="none" stroke="${INK}" stroke-width="2.5"/><line x1="${cx - gap + 9}" y1="${eyeY}" x2="${cx + gap - 9}" y2="${eyeY}" stroke="${INK}" stroke-width="2.5"/>`); // glasses
 
-    // nose
-    const noseType = Math.floor(r() * 4);
-    const ny = eyeY + between(8, 13);
-    if (noseType === 1) parts.push(`<path d="M${cx},${ny - 6} L${cx - 4},${ny + 3} L${cx + 2},${ny + 3}" stroke="${INK}" stroke-width="2.5" fill="none" stroke-linejoin="round"/>`);
-    if (noseType === 2) parts.push(`<ellipse cx="${cx}" cy="${ny}" rx="${between(4, 8)}" ry="${between(3, 6)}" fill="#ff3d17" stroke="${INK}" stroke-width="2.5"/>`);
-    if (noseType === 3) parts.push(`<circle cx="${cx - 2.5}" cy="${ny}" r="1.6" fill="${INK}"/><circle cx="${cx + 2.5}" cy="${ny}" r="1.6" fill="${INK}"/>`);
+    // brows / shades
+    if (chance(0.2)) { for (let x = lx - 1; x <= 16 - lx; x++) set(x, eyeY - 2, C.k); } // unibrow
+    else if (chance(0.2)) { set(lx, eyeY - 2, C.k); set(lx + 1, eyeY - 3, C.k); set(15 - lx, eyeY - 2, C.k); set(14 - lx, eyeY - 3, C.k); } // angry brows
+    if (chance(0.14)) { for (let x = 3; x <= 12; x++) set(x, eyeY - 1, C.k); set(3, eyeY, C.k); set(12, eyeY, C.k); set(7, eyeY, C.k); set(8, eyeY, C.k); }
 
     // mouth
-    const my = ny + between(9, 14);
-    const mw = between(8, 16);
-    const mouthType = Math.floor(r() * 6);
-    if (mouthType === 0) parts.push(`<path d="M${cx - mw},${my} Q${cx},${my + between(6, 14)} ${cx + mw},${my}" stroke="${INK}" stroke-width="3" fill="none" stroke-linecap="round"/>`);
-    if (mouthType === 1) { parts.push(`<rect x="${cx - mw}" y="${my - 4}" width="${mw * 2}" height="9" rx="2" fill="#fff" stroke="${INK}" stroke-width="2.5"/>`); for (let x = cx - mw + mw / 2; x < cx + mw - 1; x += mw / 2) parts.push(`<line x1="${x}" y1="${my - 4}" x2="${x}" y2="${my + 5}" stroke="${INK}" stroke-width="1.8"/>`); }
-    if (mouthType === 2) parts.push(`<ellipse cx="${cx}" cy="${my + 2}" rx="${between(3, 6)}" ry="${between(4, 8)}" fill="${INK}"/>`);
-    if (mouthType === 3) parts.push(`<path d="M${cx - mw},${my} q${mw / 4},-5 ${mw / 2},0 t${mw / 2},0 t${mw / 2},0 t${mw / 2},0" stroke="${INK}" stroke-width="3" fill="none" stroke-linecap="round"/>`);
-    if (mouthType === 4) parts.push(`<path d="M${cx - mw},${my} Q${cx},${my + 12} ${cx + mw},${my}Z" fill="${INK}"/><rect x="${cx - 4}" y="${my}" width="4" height="4" fill="#fff"/><rect x="${cx + 1}" y="${my}" width="4" height="5" fill="#fff"/>`);
-    if (mouthType === 5) parts.push(`<line x1="${cx - mw}" y1="${my + 2}" x2="${cx + mw}" y2="${my - 1}" stroke="${INK}" stroke-width="3" stroke-linecap="round"/>`);
-    if (r() < 0.25) parts.push(`<path d="M${cx - 12},${my - 4} Q${cx - 6},${my - 10} ${cx},${my - 5} Q${cx + 6},${my - 10} ${cx + 12},${my - 4}" stroke="${INK}" stroke-width="4" fill="none" stroke-linecap="round"/>`); // moustache
-    if (r() < 0.3) parts.push(`<circle cx="${cx - gap - 6}" cy="${my - 4}" r="4" fill="#ff3d17" opacity=".35"/><circle cx="${cx + gap + 6}" cy="${my - 4}" r="4" fill="#ff3d17" opacity=".35"/>`); // blush
+    const mouth = pick(MOUTHS);
+    const my = Math.min(eyeY + 3 + Math.floor(r() * 2), 13 - mouth.length + 1);
+    stamp(mouth, Math.round(7.5 - mouth[0].length / 2), my, false);
+    if (chance(0.2)) { set(6, my - 1, C.k); set(7, my - 2, C.k); set(8, my - 2, C.k); set(9, my - 1, C.k); } // moustache
+    if (chance(0.12)) set(9, my + mouth.length, C.b); // drool
 
+    // cheeks & extras
+    if (chance(0.4)) { set(3, my - 1, C.p); set(4, my - 1, C.p); set(11, my - 1, C.p); set(12, my - 1, C.p); }
+    if (chance(0.15)) { set(4, eyeY + 2, C.b); set(4, eyeY + 3, C.b); } // tear
+    if (chance(0.18)) { set(13, 4, C.b); set(12, 5, C.b); set(13, 5, C.b); set(14, 5, C.b); set(13, 6, C.b); } // sweat drop
+    if (chance(0.12)) { set(12, 2, C.r); set(14, 2, C.r); set(13, 3, C.r); set(12, 4, C.r); set(14, 4, C.r); } // anger mark
+    if (chance(0.12)) { set(1, 2, C.y); set(0, 3, C.y); set(2, 3, C.y); set(1, 4, C.y); } // sparkle
+    if (!ears && chance(0.3)) {
+      const top = grid.findIndex((row) => row.some(Boolean));
+      const t = pick(["tuft", "antenna", "bow", "hat", "leaf"]);
+      if (t === "tuft") { set(7, top - 1, C.k); set(8, top - 2, C.k); set(6, top - 2, C.k); }
+      if (t === "antenna") { set(8, top - 1, C.k); set(8, top - 2, C.k); set(8, top - 3, C.r); }
+      if (t === "bow") { set(3, top + 1, C.r); set(4, top + 2, C.r); set(5, top + 1, C.r); set(3, top + 3, C.r); set(5, top + 3, C.r); }
+      if (t === "hat") { for (let x = 4; x <= 11; x++) set(x, top, C.k); for (let x = 5; x <= 10; x++) for (let y = top - 3; y <= top - 1; y++) set(x, y, y === top - 1 ? C.r : C.k); }
+      if (t === "leaf") { set(8, top - 1, "#1f7a4d"); set(9, top - 2, "#1f7a4d"); set(10, top - 2, "#66cc33"); }
+    }
+
+    // render: merge horizontal runs of one colour into a single rect
+    let rects = "";
+    for (let y = 0; y < N; y++) {
+      let x = 0;
+      while (x < N) {
+        const c = grid[y][x];
+        if (!c) { x++; continue; }
+        let w = 1;
+        while (x + w < N && grid[y][x + w] === c) w++;
+        rects += `<rect x="${x + 2}" y="${y + 2}" width="${w}" height="1" fill="${c}"/>`;
+        x += w;
+      }
+    }
     const s = size || 64;
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="${s}" height="${s}" class="ava"><rect width="100" height="100" rx="14" fill="${bg}"/>${parts.join("")}</svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" width="${s}" height="${s}" class="ava" shape-rendering="crispEdges"><rect width="20" height="20" fill="${bg}"/>${rects}</svg>`;
   }
 
   function newSeed() { return Math.random().toString(36).slice(2, 10); }
