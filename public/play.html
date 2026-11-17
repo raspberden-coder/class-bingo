@@ -43,6 +43,7 @@
           </div>
           <div class="tag" id="meTag" style="text-align:right"></div>
         </div>
+        <section class="panel hidden" id="podiumPanel" style="margin-bottom:16px"><h3 id="podiumTitle">Final podium</h3><div id="podiumBox"></div></section>
         <div class="board" id="board"></div>
         <p class="tag" style="margin-top:10px">Tap a square when it happens · small number = classmates who heard it too</p>
         <div class="err" id="endedMsg"></div>
@@ -62,6 +63,7 @@
 </main>
 
 <div class="overlay" id="overlay"><div class="boom"><div class="big">BINGO!</div><div id="boomWho" style="font-size:22px;font-weight:800;margin-top:10px"></div></div></div>
+<div class="overlay" id="podiumOverlay"><div class="podium-card"><h3 id="podiumOverlayTitle">Round over</h3><div id="podiumOverlayBox"></div><p class="tag" style="margin:14px 0 0;text-align:center">Tap to close</p></div></div>
 <div class="toast" id="toast"></div>
 
 <script src="/socket.io/socket.io.js"></script>
@@ -125,6 +127,27 @@
   });
   $("overlay").addEventListener("click", () => $("overlay").classList.remove("show"));
 
+  function podiumHTML(podium) {
+    if (!podium || !podium.length) return '<p class="muted" style="margin:8px 0 0">Nobody marked anything this round.</p>';
+    const byPlace = (n) => podium.find((p) => p.place === n);
+    const step = (n) => {
+      const p = byPlace(n);
+      if (!p) return `<div class="step p${n}"></div>`;
+      const mine = me && p.name === me.name;
+      return `<div class="step p${n}"><div class="nm">${mine ? "⭐ " : ""}${esc(p.name)}</div>
+        <div class="block">${n}</div>
+        <div class="sub">${p.lines ? p.lines + " line" + (p.lines > 1 ? "s" : "") : p.marks + " marked"}</div></div>`;
+    };
+    return `<div class="podium">${step(2)}${step(1)}${step(3)}</div>`;
+  }
+  socket.on("podium", ({ round, podium }) => {
+    $("podiumOverlayTitle").textContent = `Round ${round} — final podium`;
+    $("podiumOverlayBox").innerHTML = podiumHTML(podium);
+    $("overlay").classList.remove("show");
+    $("podiumOverlay").classList.add("show");
+  });
+  $("podiumOverlay").addEventListener("click", () => $("podiumOverlay").classList.remove("show"));
+
   function winningCells() {
     const { size, cells } = me.card, on = new Set(me.marked);
     const isOn = (i) => cells[i] === null || on.has(i);
@@ -144,6 +167,9 @@
     $("roundTag").textContent = `Round ${state.round} · ${state.players.length} playing`;
     $("meTag").innerHTML = `${esc(me.name)}<br>${me.lines ? me.lines + " line" + (me.lines > 1 ? "s" : "") : me.marked.length + " marked"}`;
     $("endedMsg").textContent = state.status === "live" ? "" : "This game has ended — the card is frozen.";
+    const showPodium = state.status !== "live" && state.podium;
+    $("podiumPanel").classList.toggle("hidden", !showPodium);
+    if (showPodium) $("podiumBox").innerHTML = podiumHTML(state.podium);
 
     const { size, cells } = me.card;
     const on = new Set(me.marked), win = winningCells();

@@ -27,10 +27,17 @@
       <button class="btn" style="width:100%">Join game →</button>
       <div class="err" id="err"></div>
     </form>
-    <section class="panel">
-      <h3><span class="live-dot"></span>Live right now</h3>
-      <div class="sessions" id="sessions"><p class="muted">Looking for games…</p></div>
-    </section>
+    <div style="display:grid;gap:22px">
+      <section class="panel">
+        <h3>Hall of fame</h3>
+        <div class="fame-spot" id="fameSpot"><div class="rank">ALL SESSIONS</div><div class="who">No champions yet</div><div class="stats">Finish a game to get on the board</div></div>
+        <ol class="fame-list" id="fameList"></ol>
+      </section>
+      <section class="panel">
+        <h3><span class="live-dot"></span>Live right now</h3>
+        <div class="sessions" id="sessions"><p class="muted">Looking for games…</p></div>
+      </section>
+    </div>
   </div>
 </main>
 <script src="/socket.io/socket.io.js"></script>
@@ -50,6 +57,28 @@
   }
   socket.on("connect", () => socket.emit("lobby:join", render));
   socket.on("lobby:list", render);
+
+  // Hall of fame: cycle through the top players one by one
+  let fame = [], fameIdx = 0, fameTimer = null;
+  const medal = (i) => ["🥇", "🥈", "🥉"][i] || "";
+  function showFame() {
+    if (!fame.length) return;
+    const p = fame[fameIdx % fame.length], i = fameIdx % fame.length;
+    const spot = $("fameSpot");
+    spot.classList.remove("flip"); void spot.offsetWidth; spot.classList.add("flip");
+    spot.innerHTML = `<div class="rank">#${i + 1} OF ALL TIME</div><div class="medal">${medal(i)}</div>
+      <div class="who">${esc(p.name)}</div>
+      <div class="stats">${p.points} pts · ${p.wins} win${p.wins === 1 ? "" : "s"} · ${p.podiums} podium${p.podiums === 1 ? "" : "s"} · ${p.bingos} bingo${p.bingos === 1 ? "" : "s"}</div>`;
+    [...$("fameList").children].forEach((li, j) => li.classList.toggle("active", j === i));
+    fameIdx++;
+  }
+  socket.on("leaderboard", (list) => {
+    fame = list || [];
+    $("fameList").innerHTML = fame.map((p) => `<li><span>${esc(p.name)}</span><b>${p.points} pts</b></li>`).join("");
+    clearInterval(fameTimer);
+    fameIdx = 0;
+    if (fame.length) { showFame(); fameTimer = setInterval(showFame, 2600); }
+  });
 
   $("joinForm").addEventListener("submit", (e) => {
     e.preventDefault();

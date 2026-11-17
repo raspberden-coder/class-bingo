@@ -154,3 +154,40 @@ input.code { font-family: var(--mono); font-weight: 600; text-transform: upperca
 .bigcode { font-family: var(--mono); font-size: 46px; font-weight: 600; letter-spacing: .2em; }
 .hidden { display: none !important; }
 .spacer { height: 18px; }
+
+/* ---------- hall of fame (lobby) ---------- */
+.fame-spot {
+  position: relative; border: 2px solid var(--ink); border-radius: var(--radius); background: var(--ink); color: var(--paper);
+  padding: 16px 18px; min-height: 104px; overflow: hidden; perspective: 600px;
+}
+.fame-spot .rank { font-family: var(--mono); font-size: 13px; color: var(--acid); letter-spacing: .1em; }
+.fame-spot .who { font-size: 34px; font-weight: 800; letter-spacing: -.03em; line-height: 1.05; margin: 4px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fame-spot .stats { font-family: var(--mono); font-size: 12px; opacity: .8; }
+.fame-spot .medal { position: absolute; right: 14px; top: 12px; font-size: 38px; }
+.fame-spot.flip { animation: flip .45s ease-out; }
+@keyframes flip { from { transform: rotateX(-80deg); opacity: 0; } }
+.fame-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 4px; counter-reset: fame; }
+.fame-list li {
+  counter-increment: fame; display: grid; grid-template-columns: 28px 1fr auto; gap: 8px; align-items: center;
+  padding: 6px 8px; border: 2px solid transparent; border-radius: 3px; transition: background .25s, border-color .25s;
+}
+.fame-list li::before { content: counter(fame); font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.fame-list li.active { background: var(--acid); border-color: var(--ink); }
+.fame-list li span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.fame-list li b { font-family: var(--mono); font-size: 12px; }
+
+/* ---------- podium ---------- */
+.podium { display: grid; grid-template-columns: 1fr 1fr 1fr; align-items: end; gap: 8px; margin-top: 14px; }
+.podium .step { text-align: center; }
+.podium .step .nm { font-weight: 800; font-size: 18px; letter-spacing: -.02em; margin-bottom: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.podium .step .block {
+  border: 2px solid var(--ink); border-radius: var(--radius) var(--radius) 0 0; display: flex; align-items: flex-start; justify-content: center;
+  padding-top: 8px; font-size: 34px; font-weight: 800; transform-origin: bottom; animation: rise .5s cubic-bezier(.2,1.3,.4,1) both;
+}
+.podium .p1 .block { height: 130px; background: var(--acid); animation-delay: .5s; }
+.podium .p2 .block { height: 95px; background: #fff; animation-delay: .25s; }
+.podium .p3 .block { height: 70px; background: var(--paper-2); }
+.podium .step .sub { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-top: 4px; }
+@keyframes rise { from { transform: scaleY(0); } }
+.overlay .podium-card { background: var(--card); border: 3px solid var(--ink); box-shadow: 8px 8px 0 var(--red); padding: 22px; width: min(460px, 100%); animation: pop .35s cubic-bezier(.2,1.6,.4,1); }
+.overlay .podium-card .step .sub { color: var(--muted); }

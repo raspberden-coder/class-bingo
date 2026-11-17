@@ -7,6 +7,7 @@ const fs = require("fs");
 const http = require("http");
 const express = require("express");
 const { Server } = require("socket.io");
+const db = require("./db");
 
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "bingo";
@@ -27,6 +28,9 @@ app.get("/api/defaults", (req, res) => res.json({ categories: defaultCategories 
 app.get("/admin", (req, res) => res.redirect("/host"));
 app.get("/s/:code", (req, res) => res.sendFile(path.join(__dirname, "public", "play.html")));
 app.get("/healthz", (req, res) => res.send("ok"));
+app.get("/api/leaderboard", async (req, res) => {
+  try { res.json({ players: await db.leaderboard(10) }); } catch (e) { res.json({ players: [] }); }
+});
 
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
@@ -119,6 +123,7 @@ function publicState(s) {
     heard,
     players,
     winners: s.winners,
+    podium: s.podium || null,
     createdAt: s.createdAt,
   };
 }
@@ -146,6 +151,36 @@ const canControl = (s, { password, hostKey } = {}) =>
   !!s && ((typeof hostKey === "string" && hostKey === s.hostKey) || isAdmin(password));
 const makeKey = () => require("crypto").randomBytes(16).toString("hex");
 
+// ---------- results ----------
+/** Rank players: earliest bingo first, then more lines, then more marks. */
+function ranking(s) {
+  return [...s.players.values()]
+    .filter((p) => p.marked.size > 0)
+    .sort((a, b) =>
+      (a.bingoAt || Infinity) - (b.bingoAt || Infinity) || b.lines - a.lines || b.marked.size - a.marked.size)
+    .map((p, i) => ({ name: p.name, place: i + 1, lines: p.lines, marks: p.marked.size }));
+}
+
+let cachedBoard = [];
+async function refreshLeaderboard() {
+  try { cachedBoard = await db.leaderboard(10); } catch (e) { console.error("leaderboard:", e.message); }
+  io.to("lobby").emit("leaderboard", cachedBoard);
+}
+
+/** Close the current round once: compute the podium, store results, tell everyone. */
+function finishRound(s) {
+  if (s.recordedRound === s.round) return;
+  s.recordedRound = s.round;
+  const rows = ranking(s);
+  s.podium = rows.slice(0, 3);
+  io.to("s:" + s.code).emit("podium", { round: s.round, podium: s.podium, total: rows.length });
+  if (!rows.length) return;
+  const heardCounts = publicState(s).heard;
+  db.saveRound({ session: s.code, round: s.round, title: s.title, rows, heardCounts })
+    .then(refreshLeaderboard)
+    .catch((e) => console.error("saveRound:", e.message));
+}
+
 // ---------- sockets ----------
 io.on("connection", (socket) => {
   socket.data.playerKey = null; // {code, pid}
@@ -153,6 +188,7 @@ io.on("connection", (socket) => {
   socket.on("lobby:join", (ack) => {
     socket.join("lobby");
     if (typeof ack === "function") ack(lobbyList());
+    socket.emit("leaderboard", cachedBoard);
   });
 
   socket.on("host:check", (args = {}, ack) => {
@@ -204,7 +240,9 @@ io.on("connection", (socket) => {
     const { code } = args;
     const s = sessions.get(String(code || "").toUpperCase());
     if (!canControl(s, args)) return typeof ack === "function" && ack({ ok: false });
+    finishRound(s);
     s.round += 1;
+    s.podium = null;
     s.winners = [];
     s.status = "live";
     for (const p of s.players.values()) {
@@ -222,6 +260,7 @@ io.on("connection", (socket) => {
     const { code } = args;
     const s = sessions.get(String(code || "").toUpperCase());
     if (!canControl(s, args)) return typeof ack === "function" && ack({ ok: false });
+    finishRound(s);
     s.status = "ended";
     broadcast(s);
     typeof ack === "function" && ack({ ok: true });
@@ -315,5 +354,9 @@ setInterval(() => {
   const now = Date.now();
   for (const [code, s] of sessions) if (now - s.touchedAt > SESSION_TTL_MS) sessions.delete(code);
 }, 10 * 60 * 1000);
+
+db.init()
+  .catch((e) => console.error("Database unavailable, using memory:", e.message))
+  .finally(refreshLeaderboard);
 
 server.listen(PORT, () => console.log(`Class Bingo running on http://localhost:${PORT}`));
