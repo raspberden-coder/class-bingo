@@ -52,6 +52,9 @@ async function createTables() {
       players     INT  NOT NULL,
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    -- Lock the tables for Supabase's public API; this server connects as the owner, which bypasses RLS.
+    ALTER TABLE results ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE heard   ENABLE ROW LEVEL SECURITY;
   `);
 }
 
