@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lecture Bingo</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="logo" href="/"><span class="dot"></span>Lecture Bingo</a>
+  <a class="tag" href="/admin">Admin</a>
+</header>
+<main class="wrap">
+  <h1>He said it <em>again.</em></h1>
+  <p class="lead">Cooperative bingo for the lecture you could give yourself by now. Join with a code, tap a square each time it happens, and see who else heard it too.</p>
+  <div class="spacer"></div>
+  <div class="grid-2">
+    <form class="panel" id="joinForm" autocomplete="off">
+      <h3>Join with a code</h3>
+      <input class="code" id="code" maxlength="4" placeholder="ABCD" inputmode="text" autocapitalize="characters">
+      <div class="spacer"></div>
+      <button class="btn" style="width:100%">Join game →</button>
+      <div class="err" id="err"></div>
+    </form>
+    <section class="panel">
+      <h3><span class="live-dot"></span>Live right now</h3>
+      <div class="sessions" id="sessions"><p class="muted">Looking for games…</p></div>
+    </section>
+  </div>
+</main>
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const socket = io();
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  function render(list) {
+    const el = $("sessions");
+    if (!list.length) { el.innerHTML = '<p class="muted">No game running. Ask the admin to start one.</p>'; return; }
+    el.innerHTML = list.map((s) => `
+      <a class="session-link" href="/s/${esc(s.code)}">
+        <span><b>${esc(s.title)}</b><br><span class="tag">${s.players} playing</span></span>
+        <span class="mono" style="font-weight:600;letter-spacing:.15em">${esc(s.code)} →</span>
+      </a>`).join("");
+  }
+  socket.on("connect", () => socket.emit("lobby:join", render));
+  socket.on("lobby:list", render);
+
+  $("joinForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const code = $("code").value.trim().toUpperCase();
+    if (code.length !== 4) { $("err").textContent = "Codes are 4 letters."; return; }
+    socket.emit("session:watch", { code }, (res) => {
+      if (res.ok) location.href = "/s/" + code;
+      else $("err").textContent = res.error || "Not found";
+    });
+  });
+</script>
+</body>
+</html>

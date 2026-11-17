@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Lecture Bingo — play</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="logo" href="/"><span class="dot"></span>Lecture Bingo</a>
+  <span class="tag" id="codeTag"></span>
+</header>
+
+<main class="wrap">
+  <!-- name entry -->
+  <section id="joinView" class="hidden">
+    <h1 id="joinTitle">Join</h1>
+    <form class="panel" id="nameForm" style="max-width:460px" autocomplete="off">
+      <h3>Your name</h3>
+      <input id="name" maxlength="24" placeholder="e.g. Denis">
+      <div class="spacer"></div>
+      <button class="btn" style="width:100%">Get my card →</button>
+      <div class="err" id="err"></div>
+    </form>
+  </section>
+
+  <!-- not found -->
+  <section id="missingView" class="hidden">
+    <h1>No such <em>game.</em></h1>
+    <p class="lead" id="missingMsg">This session doesn't exist (or it expired).</p>
+    <a class="btn" href="/">Back to the lobby</a>
+  </section>
+
+  <!-- game -->
+  <section id="gameView" class="hidden">
+    <div class="grid-2">
+      <div>
+        <div class="card-head">
+          <div>
+            <div class="tag" id="roundTag"></div>
+            <h2 id="title" style="margin:2px 0 0"></h2>
+          </div>
+          <div class="tag" id="meTag" style="text-align:right"></div>
+        </div>
+        <div class="board" id="board"></div>
+        <p class="tag" style="margin-top:10px">Tap a square when it happens · small number = classmates who heard it too</p>
+        <div class="err" id="endedMsg"></div>
+      </div>
+      <aside style="display:grid;gap:18px">
+        <section class="panel">
+          <h3>Players</h3>
+          <ul class="players" id="players"></ul>
+        </section>
+        <section class="panel">
+          <h3>What the class has heard</h3>
+          <div class="heat" id="heat"></div>
+        </section>
+      </aside>
+    </div>
+  </section>
+</main>
+
+<div class="overlay" id="overlay"><div class="boom"><div class="big">BINGO!</div><div id="boomWho" style="font-size:22px;font-weight:800;margin-top:10px"></div></div></div>
+<div class="toast" id="toast"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+  };
+
+  const code = (location.pathname.split("/s/")[1] || new URLSearchParams(location.search).get("code") || "").slice(0, 4).toUpperCase();
+  $("codeTag").textContent = code ? "Code " + code : "";
+  let pid = store.get("lb_pid_" + code);
+  if (!pid) { pid = Math.random().toString(36).slice(2) + Date.now().toString(36); store.set("lb_pid_" + code, pid); }
+  $("name").value = store.get("lb_name") || "";
+
+  let state = null, me = null, joined = false;
+  const socket = io();
+
+  function show(view) {
+    for (const v of ["joinView", "missingView", "gameView"]) $(v).classList.toggle("hidden", v !== view);
+  }
+
+  function tryRejoin() {
+    // Rejoin silently if this browser already has a card in this session
+    socket.emit("player:join", { code, pid }, (res) => {
+      if (res.ok) { joined = true; state = res.state; me = res.you; show("gameView"); render(); return; }
+      socket.emit("session:watch", { code }, (w) => {
+        if (!w.ok) { show("missingView"); return; }
+        state = w.state;
+        $("joinTitle").innerHTML = esc(state.title) + "<br><em>bingo.</em>";
+        if (state.status !== "live") { $("missingMsg").textContent = "This game has ended."; show("missingView"); return; }
+        show("joinView");
+        $("name").focus();
+      });
+    });
+  }
+  socket.on("connect", () => { if (code) tryRejoin(); else show("missingView"); });
+
+  $("nameForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const name = $("name").value.trim();
+    if (!name) { $("err").textContent = "Enter a name."; return; }
+    store.set("lb_name", name);
+    socket.emit("player:join", { code, pid, name }, (res) => {
+      if (!res.ok) { $("err").textContent = res.error; return; }
+      joined = true; state = res.state; me = res.you; show("gameView"); render();
+    });
+  });
+
+  socket.on("session:state", (s) => { state = s; if (joined) render(); });
+  socket.on("you", (y) => { me = y; render(); });
+  socket.on("kicked", () => { joined = false; toast("You were removed from this game."); show("missingView"); });
+  socket.on("bingo", ({ name, lines, first }) => {
+    const mine = me && name === me.name;
+    $("boomWho").textContent = mine ? (lines > 1 ? `You: ${lines} lines!` : "That's you!") : `${name}${first ? " got there first" : " got a line"}`;
+    $("overlay").classList.add("show");
+    clearTimeout(window._boom);
+    window._boom = setTimeout(() => $("overlay").classList.remove("show"), mine ? 3200 : 2200);
+  });
+  $("overlay").addEventListener("click", () => $("overlay").classList.remove("show"));
+
+  function winningCells() {
+    const { size, cells } = me.card, on = new Set(me.marked);
+    const isOn = (i) => cells[i] === null || on.has(i);
+    const win = new Set();
+    const L = [];
+    for (let r = 0; r < size; r++) L.push([...Array(size)].map((_, c) => r * size + c));
+    for (let c = 0; c < size; c++) L.push([...Array(size)].map((_, r) => r * size + c));
+    L.push([...Array(size)].map((_, i) => i * size + i));
+    L.push([...Array(size)].map((_, i) => i * size + (size - 1 - i)));
+    for (const line of L) if (line.every(isOn)) line.forEach((i) => win.add(i));
+    return win;
+  }
+
+  function render() {
+    if (!state || !me) return;
+    $("title").textContent = state.title;
+    $("roundTag").textContent = `Round ${state.round} · ${state.players.length} playing`;
+    $("meTag").innerHTML = `${esc(me.name)}<br>${me.lines ? me.lines + " line" + (me.lines > 1 ? "s" : "") : me.marked.length + " marked"}`;
+    $("endedMsg").textContent = state.status === "live" ? "" : "This game has ended — the card is frozen.";
+
+    const { size, cells } = me.card;
+    const on = new Set(me.marked), win = winningCells();
+    const others = Math.max(1, state.players.length);
+    const board = $("board");
+    board.className = "board s" + size;
+    board.style.gridTemplateColumns = `repeat(${size}, 1fr)`;
+    board.innerHTML = cells.map((c, i) => {
+      if (c === null) return `<div class="cell free ${win.has(i) ? "win" : ""}">free<br>space</div>`;
+      const heard = state.heard[c] || 0;
+      const cls = ["cell", on.has(i) ? "on" : "", win.has(i) ? "win" : "", heard / others >= 0.5 && heard > 1 ? "hot" : ""].join(" ");
+      return `<div class="${cls}" data-i="${i}">${heard ? `<span class="heard">${heard}</span>` : ""}<span class="t">${esc(c)}</span></div>`;
+    }).join("");
+
+    $("players").innerHTML = state.players.map((p) => `
+      <li class="${p.name === me.name ? "me" : ""} ${p.online ? "" : "off"}">
+        <span>${esc(p.name)}</span>
+        <span>${p.lines ? `<span class="bingo-badge">BINGO ×${p.lines}</span>` : `<span class="badge">${p.marks} ✓</span>`}</span>
+      </li>`).join("");
+
+    const max = Math.max(1, ...Object.values(state.heard));
+    const heatList = Object.entries(state.heard).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
+    $("heat").innerHTML = heatList.length ? heatList.map(([cat, n]) => `
+      <div class="heat-row"><div class="heat-bar"><span style="width:${(n / max) * 100}%"></span><label>${esc(cat)}</label></div><b class="mono">${n}</b></div>`).join("")
+      : '<p class="muted" style="margin:0">Nothing yet. He is warming up.</p>';
+  }
+
+  $("board").addEventListener("click", (e) => {
+    const cell = e.target.closest(".cell[data-i]");
+    if (!cell || !state || state.status !== "live") return;
+    const idx = Number(cell.dataset.i);
+    // optimistic toggle
+    const set = new Set(me.marked);
+    set.has(idx) ? set.delete(idx) : set.add(idx);
+    me = { ...me, marked: [...set] };
+    render();
+    if (navigator.vibrate) navigator.vibrate(15);
+    socket.emit("player:mark", { idx }, (res) => { if (res && res.ok) { me = res.you; render(); } });
+  });
+
+  function toast(msg) {
+    const t = $("toast"); t.textContent = msg; t.classList.add("show");
+    clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2600);
+  }
+  socket.on("disconnect", () => toast("Connection lost — reconnecting…"));
+</script>
+</body>
+</html>

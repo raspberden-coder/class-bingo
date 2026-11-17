@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lecture Bingo — admin</title>
+<link rel="stylesheet" href="/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <a class="logo" href="/"><span class="dot"></span>Lecture Bingo</a>
+  <span class="tag">Admin</span>
+</header>
+<main class="wrap">
+
+  <!-- login -->
+  <section id="loginView" class="hidden">
+    <h1>Admin <em>mode.</em></h1>
+    <form class="panel" id="loginForm" style="max-width:420px">
+      <h3>Password</h3>
+      <input type="password" id="pw" autocomplete="current-password">
+      <div class="spacer"></div>
+      <button class="btn" style="width:100%">Enter →</button>
+      <div class="err" id="loginErr"></div>
+    </form>
+  </section>
+
+  <!-- setup -->
+  <section id="setupView" class="hidden">
+    <h1>Set the <em>squares.</em></h1>
+    <div class="grid-2">
+      <div class="panel">
+        <h3>Categories — one per line</h3>
+        <textarea id="cats" spellcheck="false"></textarea>
+        <div class="row" style="justify-content:space-between;margin-top:10px">
+          <span class="tag" id="catCount"></span>
+          <button class="btn ghost small" id="resetCats" type="button">Reset to defaults</button>
+        </div>
+      </div>
+      <div style="display:grid;gap:18px">
+        <form class="panel" id="createForm">
+          <h3>New session</h3>
+          <input id="title" maxlength="60" placeholder="Session title, e.g. Thursday lecture">
+          <div class="spacer"></div>
+          <button class="btn" style="width:100%">Start session →</button>
+          <div class="err" id="createErr"></div>
+          <p class="tag" style="margin:6px 0 0">8+ squares → 3×3 · 15+ → 4×4 · 24+ → 5×5. Each player gets a random card.</p>
+        </form>
+        <section class="panel" id="recentPanel">
+          <h3>Your recent sessions</h3>
+          <div class="sessions" id="recent"></div>
+        </section>
+      </div>
+    </div>
+  </section>
+
+  <!-- live dashboard -->
+  <section id="liveView" class="hidden">
+    <div class="row" style="justify-content:space-between;margin-top:18px">
+      <button class="btn ghost small" id="backBtn">← Setup</button>
+      <span class="tag" id="liveStatus"></span>
+    </div>
+    <h1 id="liveTitle" style="font-size:clamp(36px,6vw,72px)"></h1>
+    <div class="grid-2">
+      <div style="display:grid;gap:18px">
+        <section class="panel">
+          <h3>Share</h3>
+          <div class="row" style="align-items:flex-start;gap:20px">
+            <div class="qr" id="qr"></div>
+            <div style="flex:1;min-width:220px">
+              <div class="tag">Code</div>
+              <div class="bigcode" id="liveCode"></div>
+              <div class="spacer"></div>
+              <input id="shareLink" readonly onclick="this.select()">
+              <div class="row" style="margin-top:10px">
+                <button class="btn small" id="copyBtn">Copy link</button>
+                <a class="btn acid small" id="playBtn" target="_blank">Play myself ↗</a>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section class="panel">
+          <h3>What the class has heard</h3>
+          <div class="heat" id="heat"></div>
+        </section>
+      </div>
+      <div style="display:grid;gap:18px">
+        <section class="panel">
+          <h3>Controls</h3>
+          <div class="row">
+            <button class="btn acid" id="roundBtn">New round (new cards)</button>
+            <button class="btn ghost" id="endBtn">End session</button>
+          </div>
+          <p class="tag" style="margin:10px 0 0">Edited the categories? Click “Apply categories”, then start a new round.</p>
+          <div class="row" style="margin-top:8px"><button class="btn ghost small" id="applyBtn">Apply categories</button></div>
+        </section>
+        <section class="panel">
+          <h3>Players <span id="pcount"></span></h3>
+          <ul class="players" id="players"></ul>
+        </section>
+        <section class="panel">
+          <h3>Bingo log</h3>
+          <div id="winners" class="muted">No bingo yet.</div>
+        </section>
+      </div>
+    </div>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+  };
+  const socket = io();
+  let password = store.get("lb_admin_pw") || "";
+  let defaults = [];
+  let liveCode = null, liveState = null;
+
+  function show(view) { for (const v of ["loginView", "setupView", "liveView"]) $(v).classList.toggle("hidden", v !== view); }
+  function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2400); }
+  const getCats = () => $("cats").value.split("\n").map((s) => s.trim()).filter(Boolean);
+  function updateCount() {
+    const n = getCats().length;
+    const size = n >= 24 ? 5 : n >= 15 ? 4 : 3;
+    $("catCount").textContent = n < 8 ? `${n} squares — need at least 8` : `${n} squares → ${size}×${size} cards`;
+    store.set("lb_cats", $("cats").value);
+  }
+  $("cats").addEventListener("input", updateCount);
+
+  fetch("/api/defaults").then((r) => r.json()).then((d) => {
+    defaults = d.categories || [];
+    $("cats").value = store.get("lb_cats") || defaults.join("\n");
+    updateCount();
+  });
+  $("resetCats").onclick = () => { $("cats").value = defaults.join("\n"); updateCount(); };
+
+  function recent() { try { return JSON.parse(store.get("lb_recent") || "[]"); } catch (e) { return []; } }
+  function renderRecent() {
+    const list = recent();
+    $("recentPanel").classList.toggle("hidden", !list.length);
+    $("recent").innerHTML = list.map((s) => `<a class="session-link" href="#" data-code="${esc(s.code)}"><span><b>${esc(s.title)}</b><br><span class="tag">${new Date(s.at).toLocaleString()}</span></span><span class="mono">${esc(s.code)} →</span></a>`).join("");
+  }
+  $("recent").addEventListener("click", (e) => { const a = e.target.closest("[data-code]"); if (a) { e.preventDefault(); openLive(a.dataset.code); } });
+
+  function login(pw, silent) {
+    socket.emit("admin:auth", { password: pw }, (res) => {
+      if (res.ok) {
+        password = pw; store.set("lb_admin_pw", pw);
+        const hashCode = location.hash.slice(1).toUpperCase();
+        if (hashCode.length === 4) openLive(hashCode); else { show("setupView"); renderRecent(); }
+      } else { show("loginView"); if (!silent) $("loginErr").textContent = "Wrong password."; }
+    });
+  }
+  socket.on("connect", () => login(password, true));
+  $("loginForm").addEventListener("submit", (e) => { e.preventDefault(); login($("pw").value, false); });
+
+  $("createForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    $("createErr").textContent = "";
+    const title = $("title").value.trim() || "Lecture Bingo";
+    socket.emit("admin:create", { password, title, categories: getCats() }, (res) => {
+      if (!res.ok) { $("createErr").textContent = res.error; return; }
+      const list = recent().filter((s) => s.code !== res.code);
+      list.unshift({ code: res.code, title, at: Date.now() });
+      store.set("lb_recent", JSON.stringify(list.slice(0, 8)));
+      openLive(res.code);
+    });
+  });
+
+  function openLive(code) {
+    socket.emit("session:watch", { code }, (res) => {
+      if (!res.ok) { toast("That session has expired."); show("setupView"); renderRecent(); return; }
+      liveCode = code; liveState = res.state; location.hash = code;
+      const link = location.origin + "/s/" + code;
+      $("shareLink").value = link; $("playBtn").href = link; $("liveCode").textContent = code;
+      try { const q = qrcode(0, "M"); q.addData(link); q.make(); $("qr").innerHTML = q.createImgTag(6, 0); } catch (e) { $("qr").classList.add("hidden"); }
+      show("liveView"); renderLive();
+    });
+  }
+  socket.on("session:state", (s) => { if (s.code === liveCode) { liveState = s; renderLive(); } });
+
+  function renderLive() {
+    const s = liveState; if (!s) return;
+    $("liveTitle").textContent = s.title;
+    $("liveStatus").innerHTML = s.status === "live" ? `<span class="live-dot"></span>Live · round ${s.round}` : "Ended";
+    $("pcount").textContent = `(${s.players.length})`;
+    $("players").innerHTML = s.players.length ? s.players.map((p) => `
+      <li class="${p.online ? "" : "off"}"><span>${esc(p.name)} ${p.lines ? `<span class="bingo-badge">BINGO ×${p.lines}</span>` : ""}</span>
+      <span class="row" style="gap:6px"><span class="badge">${p.marks} ✓</span><button class="btn ghost small" data-kick="${esc(p.name)}">✕</button></span></li>`).join("")
+      : '<p class="muted" style="margin:0">Waiting for players… share the link or QR.</p>';
+    const max = Math.max(1, ...Object.values(s.heard));
+    const rows = Object.entries(s.heard).sort((a, b) => b[1] - a[1]);
+    $("heat").innerHTML = rows.map(([cat, n]) => `<div class="heat-row"><div class="heat-bar"><span style="width:${(n / max) * 100}%"></span><label>${esc(cat)}</label></div><b class="mono">${n}</b></div>`).join("");
+    $("winners").innerHTML = s.winners.length ? s.winners.map((w) => `<div><b>${esc(w.name)}</b> — ${w.lines} line${w.lines > 1 ? "s" : ""} · <span class="tag">${new Date(w.at).toLocaleTimeString()}</span></div>`).join("") : "No bingo yet.";
+  }
+  $("players").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-kick]"); if (!b) return;
+    socket.emit("admin:kick", { password, code: liveCode, name: b.dataset.kick }, () => toast("Removed " + b.dataset.kick));
+  });
+  $("roundBtn").onclick = () => socket.emit("admin:newround", { password, code: liveCode }, (r) => toast(r.ok ? "New round — fresh cards dealt" : "Failed"));
+  $("endBtn").onclick = () => socket.emit("admin:end", { password, code: liveCode }, (r) => toast(r.ok ? "Session ended" : "Failed"));
+  $("applyBtn").onclick = () => socket.emit("admin:update", { password, code: liveCode, categories: getCats() }, (r) => toast(r.ok ? "Saved — start a new round to deal them" : (r.error || "Failed")));
+  $("copyBtn").onclick = async () => { try { await navigator.clipboard.writeText($("shareLink").value); toast("Link copied"); } catch (e) { $("shareLink").select(); toast("Press Ctrl/Cmd+C to copy"); } };
+  $("backBtn").onclick = () => { liveCode = null; history.replaceState(null, "", "/admin"); show("setupView"); renderRecent(); };
+</script>
+</body>
+</html>
