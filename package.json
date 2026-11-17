@@ -1,7 +1,7 @@
 {
   "name": "lecture-bingo",
   "version": "1.0.0",
-  "description": "Cooperative live bingo for repetitive lectures",
+  "description": "Cooperative live bingo for class",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

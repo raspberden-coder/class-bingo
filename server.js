@@ -1,4 +1,4 @@
-// Lecture Bingo: cooperative live bingo for repetitive lectures.
+// Class Bingo: cooperative live bingo for class.
 // Express serves the pages and Socket.io keeps every player in sync.
 // Session state is kept in memory (bingo is played live, one lesson at a time).
 
@@ -10,6 +10,7 @@ const { Server } = require("socket.io");
 
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "bingo";
+const MAX_LIVE_SESSIONS = 200;
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000; // sessions vanish after 8h without activity
 
 let defaultCategories = [];
@@ -23,6 +24,7 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public"), { extensions: ["html"] }));
 app.get("/api/defaults", (req, res) => res.json({ categories: defaultCategories }));
+app.get("/admin", (req, res) => res.redirect("/host"));
 app.get("/s/:code", (req, res) => res.sendFile(path.join(__dirname, "public", "play.html")));
 app.get("/healthz", (req, res) => res.send("ok"));
 
@@ -139,6 +141,10 @@ function lobbyList() {
 }
 
 const isAdmin = (pw) => typeof pw === "string" && pw === ADMIN_PASSWORD;
+// The host of a session holds its secret hostKey; ADMIN_PASSWORD works as a master key for every session.
+const canControl = (s, { password, hostKey } = {}) =>
+  !!s && ((typeof hostKey === "string" && hostKey === s.hostKey) || isAdmin(password));
+const makeKey = () => require("crypto").randomBytes(16).toString("hex");
 
 // ---------- sockets ----------
 io.on("connection", (socket) => {
@@ -149,19 +155,27 @@ io.on("connection", (socket) => {
     if (typeof ack === "function") ack(lobbyList());
   });
 
+  socket.on("host:check", (args = {}, ack) => {
+    const s = sessions.get(String(args.code || "").toUpperCase());
+    if (typeof ack === "function") ack({ ok: canControl(s, args) });
+  });
+
   socket.on("admin:auth", ({ password } = {}, ack) => {
     if (typeof ack === "function") ack({ ok: isAdmin(password) });
   });
 
-  socket.on("admin:create", ({ password, title, categories } = {}, ack) => {
+  socket.on("admin:create", ({ title, categories } = {}, ack) => {
     if (typeof ack !== "function") return;
-    if (!isAdmin(password)) return ack({ ok: false, error: "Wrong admin password" });
+    if ([...sessions.values()].filter((x) => x.status === "live").length >= MAX_LIVE_SESSIONS)
+      return ack({ ok: false, error: "Too many games running right now, try again later" });
     const cats = [...new Set((Array.isArray(categories) ? categories : []).map((c) => clean(c, 60)).filter(Boolean))].slice(0, 60);
     if (cats.length < 8) return ack({ ok: false, error: "Add at least 8 categories" });
     const code = makeCode();
+    const hostKey = makeKey();
     const s = {
       code,
-      title: clean(title, 60) || "Lecture Bingo",
+      hostKey,
+      title: clean(title, 60) || "Class Bingo",
       categories: cats,
       status: "live",
       round: 1,
@@ -172,12 +186,13 @@ io.on("connection", (socket) => {
     };
     sessions.set(code, s);
     broadcast(s);
-    ack({ ok: true, code });
+    ack({ ok: true, code, hostKey });
   });
 
-  socket.on("admin:update", ({ password, code, categories } = {}, ack) => {
+  socket.on("admin:update", (args = {}, ack) => {
+    const { code, categories } = args;
     const s = sessions.get(String(code || "").toUpperCase());
-    if (!s || !isAdmin(password)) return typeof ack === "function" && ack({ ok: false });
+    if (!canControl(s, args)) return typeof ack === "function" && ack({ ok: false });
     const cats = [...new Set((categories || []).map((c) => clean(c, 60)).filter(Boolean))].slice(0, 60);
     if (cats.length < 8) return typeof ack === "function" && ack({ ok: false, error: "Add at least 8 categories" });
     s.categories = cats;
@@ -185,9 +200,10 @@ io.on("connection", (socket) => {
     typeof ack === "function" && ack({ ok: true, note: "Applies from the next round" });
   });
 
-  socket.on("admin:newround", ({ password, code } = {}, ack) => {
+  socket.on("admin:newround", (args = {}, ack) => {
+    const { code } = args;
     const s = sessions.get(String(code || "").toUpperCase());
-    if (!s || !isAdmin(password)) return typeof ack === "function" && ack({ ok: false });
+    if (!canControl(s, args)) return typeof ack === "function" && ack({ ok: false });
     s.round += 1;
     s.winners = [];
     s.status = "live";
@@ -202,17 +218,19 @@ io.on("connection", (socket) => {
     typeof ack === "function" && ack({ ok: true });
   });
 
-  socket.on("admin:end", ({ password, code } = {}, ack) => {
+  socket.on("admin:end", (args = {}, ack) => {
+    const { code } = args;
     const s = sessions.get(String(code || "").toUpperCase());
-    if (!s || !isAdmin(password)) return typeof ack === "function" && ack({ ok: false });
+    if (!canControl(s, args)) return typeof ack === "function" && ack({ ok: false });
     s.status = "ended";
     broadcast(s);
     typeof ack === "function" && ack({ ok: true });
   });
 
-  socket.on("admin:kick", ({ password, code, name } = {}, ack) => {
+  socket.on("admin:kick", (args = {}, ack) => {
+    const { code, name } = args;
     const s = sessions.get(String(code || "").toUpperCase());
-    if (!s || !isAdmin(password)) return typeof ack === "function" && ack({ ok: false });
+    if (!canControl(s, args)) return typeof ack === "function" && ack({ ok: false });
     for (const [pid, p] of s.players) {
       if (p.name === name) {
         for (const sid of p.sockets) io.to(sid).emit("kicked");
@@ -298,4 +316,4 @@ setInterval(() => {
   for (const [code, s] of sessions) if (now - s.touchedAt > SESSION_TTL_MS) sessions.delete(code);
 }, 10 * 60 * 1000);
 
-server.listen(PORT, () => console.log(`Lecture Bingo running on http://localhost:${PORT}`));
+server.listen(PORT, () => console.log(`Class Bingo running on http://localhost:${PORT}`));

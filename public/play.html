@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>Lecture Bingo — play</title>
+<title>Class Bingo</title>
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 <header class="topbar">
-  <a class="logo" href="/"><span class="dot"></span>Lecture Bingo</a>
+  <a class="logo" href="/"><span class="dot"></span>Class Bingo</a>
   <span class="tag" id="codeTag"></span>
 </header>
 
@@ -18,7 +18,7 @@
     <h1 id="joinTitle">Join</h1>
     <form class="panel" id="nameForm" style="max-width:460px" autocomplete="off">
       <h3>Your name</h3>
-      <input id="name" maxlength="24" placeholder="e.g. Denis">
+      <input id="name" maxlength="24" placeholder="or a nickname">
       <div class="spacer"></div>
       <button class="btn" style="width:100%">Get my card →</button>
       <div class="err" id="err"></div>
@@ -168,7 +168,7 @@
     const heatList = Object.entries(state.heard).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
     $("heat").innerHTML = heatList.length ? heatList.map(([cat, n]) => `
       <div class="heat-row"><div class="heat-bar"><span style="width:${(n / max) * 100}%"></span><label>${esc(cat)}</label></div><b class="mono">${n}</b></div>`).join("")
-      : '<p class="muted" style="margin:0">Nothing yet. He is warming up.</p>';
+      : '<p class="muted" style="margin:0">Nothing marked yet.</p>';
   }
 
   $("board").addEventListener("click", (e) => {
